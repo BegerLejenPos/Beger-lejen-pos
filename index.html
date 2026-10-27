@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="ms">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#b5121b">
+  <title>Burger Lejen POS</title>
+  <style>
+    :root{--red:#b5121b;--dark:#171717;--yellow:#ffd43b;--muted:#666}
+    *{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#f3f3f3;color:#181818}
+    header{background:var(--red);color:#fff;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+    header h1{margin:0;font-size:21px}header small{display:block;margin-top:4px}
+    main{max-width:900px;margin:0 auto;padding:14px}
+    .panel{background:white;border-radius:14px;padding:16px;margin:12px 0;box-shadow:0 2px 10px #0000000d}
+    .hidden{display:none!important}.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:130px}
+    input,button,select{font:inherit;padding:12px;border-radius:9px;border:1px solid #ccc;width:100%}
+    button{background:var(--red);color:white;border:0;font-weight:700;cursor:pointer}
+    button.secondary{background:#333}button.yellow{background:var(--yellow);color:#181818}
+    .tabs{display:flex;gap:8px;margin:12px 0}.tabs button{flex:1}
+    .products{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}
+    .product{border:1px solid #ddd;background:#fff;color:#181818;text-align:left;padding:13px;min-height:86px}
+    .product strong{display:block;margin-bottom:8px}.product span{color:var(--red);font-weight:bold}
+    .line{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid #eee}
+    .muted{color:var(--muted);font-size:13px}.total{font-size:22px;font-weight:800}
+    .notice{background:#fff7d6;border-radius:9px;padding:10px;font-size:13px;line-height:1.4}
+    .status{font-size:13px;color:#fff;opacity:.95}.error{color:#b5121b}.success{color:#087443}
+  </style>
+</head>
+<body>
+<header>
+  <div><h1>🍔 Burger Lejen POS</h1><small>Setiap gigitan ada rasa yang dirindui.</small></div>
+  <button id="logoutBtn" class="secondary hidden" style="width:auto">Log keluar</button>
+</header>
+<main>
+  <section id="loginPanel" class="panel">
+    <h2>Log masuk</h2>
+    <p class="muted">Gunakan akaun yang telah didaftarkan dalam Firebase Authentication.</p>
+    <form id="loginForm">
+      <label for="email">E-mel</label><input id="email" type="email" autocomplete="username" required>
+      <br><br><label for="password">Kata laluan</label><input id="password" type="password" autocomplete="current-password" required>
+      <br><br><button type="submit">Log masuk</button>
+    </form>
+    <p id="loginMessage" class="error"></p>
+  </section>
+
+  <section id="appPanel" class="hidden">
+    <div class="panel">
+      <div class="row" style="align-items:center">
+        <div><strong id="welcome">POS</strong><div id="roleLabel" class="muted"></div></div>
+        <div><div class="muted">Jumlah pesanan semasa</div><div id="cartTotal" class="total">RM0.00</div></div>
+      </div>
+      <div id="globalMessage" class="muted"></div>
+    </div>
+    <div class="tabs">
+      <button data-tab="menuTab">Menu</button><button data-tab="historyTab">Sejarah jualan</button>
+    </div>
+    <section id="menuTab" class="panel">
+      <h2>Menu Burger Lejen</h2>
+      <div id="products" class="products"></div>
+      <h3>Pesanan</h3><div id="cart"></div>
+      <div class="row" style="margin-top:12px">
+        <div><label for="cashReceived">Tunai diterima (RM)</label><input id="cashReceived" type="number" min="0" step="0.01" placeholder="Contoh: 20.00"></div>
+        <div><label>Baki</label><div id="change" class="total">RM0.00</div></div>
+      </div>
+      <div class="row" style="margin-top:12px"><button id="checkoutBtn">Simpan jualan</button><button id="clearCartBtn" class="secondary">Kosongkan pesanan</button></div>
+      <p class="muted">Harga dan menu boleh disunting dalam fail index.html.</p>
+    </section>
+    <section id="historyTab" class="panel hidden">
+      <h2>Sejarah jualan</h2><button id="refreshHistoryBtn" class="secondary">Muat semula</button>
+      <div id="history"></div>
+    </section>
+  </section>
+  <section class="panel notice">
+    <strong>Nota persediaan:</strong> Fail ini ialah rangka permulaan Firebase. Ia memerlukan konfigurasi Firebase dan dokumen peranan pengguna sebelum digunakan. Jangan jadikan Firestore terbuka kepada semua orang.
+  </section>
+</main>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-auth.js";
+import { getFirestore, doc, getDoc, collection, addDoc, getDocs, query, orderBy, limit, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCMFxuU746WDNX_c-EIiDuGa0zAZsUdudw",
+  authDomain: "burger-lejen-pos.firebaseapp.com",
+  projectId: "burger-lejen-pos",
+  storageBucket: "burger-lejen-pos.firebasestorage.app",
+  messagingSenderId: "464903886596",
+  appId: "1:464903886596:web:442fcf95b129dd327a2251"
+};
+
+const menu = [
+  {id:"daging", name:"Burger Daging Biasa", price:4.50},
+  {id:"ayam", name:"Burger Ayam Special", price:6.00},
+  {id:"double", name:"Burger Double Cheese", price:8.50},
+  {id:"kahwin", name:"Burger Kahwin Lejen", price:9.50},
+  {id:"kambing", name:"Oblong Kambing Padu", price:10.00},
+  {id:"fries", name:"Kentang Goreng (Fries)", price:4.00},
+  {id:"air", name:"Air Balang Lejen", price:3.00}
+];
+const money = n => "RM" + Number(n || 0).toFixed(2);
+const $ = id => document.getElementById(id);
+let app, auth, db, currentUser = null, role = null, cart = [];
+
+function showMessage(message, type="muted") {
+  $("globalMessage").className = type;
+  $("globalMessage").textContent = message;
+}
+function renderProducts() {
+  $("products").innerHTML = "";
+  menu.forEach(p => {
+    const b = document.createElement("button");
+    b.className = "product";
+    b.innerHTML = `<strong>${p.name}</strong><span>${money(p.price)}</span>`;
+    b.addEventListener("click", () => { const found = cart.find(x => x.id === p.id); if(found) found.qty++; else cart.push({...p,qty:1}); renderCart(); });
+    $("products").appendChild(b);
+  });
+}
+function renderCart() {
+  $("cart").innerHTML = "";
+  cart.forEach(item => {
+    const line = document.createElement("div"); line.className = "line";
+    const info = document.createElement("div");
+    info.innerHTML = `<strong>${item.name}</strong><div class="muted">${money(item.price)} × ${item.qty}</div>`;
+    const controls = document.createElement("div"); controls.style.minWidth="110px";
+    const btn = document.createElement("button"); btn.className="secondary"; btn.textContent="−  /  +";
+    btn.addEventListener("click", () => { if(item.qty === 1) cart = cart.filter(x=>x.id!==item.id); else item.qty--; renderCart(); });
+    controls.appendChild(btn); line.append(info,controls); $("cart").appendChild(line);
+  });
+  const total = cart.reduce((s,x)=>s+x.price*x.qty,0);
+  $("cartTotal").textContent = money(total);
+  const cash = Number($("cashReceived").value || 0);
+  $("change").textContent = money(Math.max(0,cash-total));
+}
+$("cashReceived").addEventListener("input", renderCart);
+$("clearCartBtn").addEventListener("click", () => {cart=[]; $("cashReceived").value="";renderCart();});
+document.querySelectorAll("[data-tab]").forEach(b=>b.addEventListener("click",()=>{
+  $("menuTab").classList.toggle("hidden",b.dataset.tab!=="menuTab");
+  $("historyTab").classList.toggle("hidden",b.dataset.tab!=="historyTab");
+  if(b.dataset.tab==="historyTab") loadHistory();
+}));
+$("loginForm").addEventListener("submit", async e=>{
+  e.preventDefault(); $("loginMessage").textContent="";
+  try { await signInWithEmailAndPassword(auth,$("email").value.trim(),$("password").value); }
+  catch(err){ $("loginMessage").textContent = friendlyError(err); }
+});
+$("logoutBtn").addEventListener("click",()=>signOut(auth));
+$("checkoutBtn").addEventListener("click", async ()=>{
+  if(!cart.length){showMessage("Masukkan sekurang-kurangnya satu produk.","error");return;}
+  const total=cart.reduce((s,x)=>s+x.price*x.qty,0), cash=Number($("cashReceived").value||0);
+  if(cash<total){showMessage("Tunai diterima tidak mencukupi.","error");return;}
+  try {
+    await addDoc(collection(db,"sales"), {
+      items:cart.map(({id,name,price,qty})=>({id,name,price,qty})),
+      total, cashReceived:cash, change:cash-total,
+      createdAt:serverTimestamp(), createdBy:currentUser.uid, createdByEmail:currentUser.email, status:"completed"
+    });
+    cart=[];$("cashReceived").value="";renderCart();showMessage("Jualan berjaya disimpan ke Firestore.","success");
+  } catch(err){showMessage("Tidak dapat simpan jualan: "+friendlyError(err),"error");}
+});
+$("refreshHistoryBtn").addEventListener("click",loadHistory);
+
+function friendlyError(err) {
+  const code=err?.code||"";
+  const map={
+    "auth/invalid-credential":"E-mel atau kata laluan salah.",
+    "auth/invalid-email":"Format e-mel tidak sah.",
+    "auth/too-many-requests":"Terlalu banyak cubaan. Cuba lagi kemudian.",
+    "auth/network-request-failed":"Sambungan internet bermasalah.",
+    "permission-denied":"Akses ditolak oleh Firestore Rules. Semak rules dan dokumen users/{UID}.",
+    "unavailable":"Firebase tidak dapat dicapai. Semak sambungan internet."
+  };
+  return map[code] || (err?.message || "Ralat tidak diketahui.");
+}
+async function loadHistory() {
+  $("history").textContent="Memuatkan sejarah jualan…";
+  try {
+    const q=query(collection(db,"sales"),orderBy("createdAt","desc"),limit(50));
+    const snap=await getDocs(q); $("history").innerHTML="";
+    if(snap.empty){$("history").textContent="Belum ada rekod jualan.";return;}
+    snap.forEach(d=>{
+      const x=d.data(), line=document.createElement("div");line.className="line";
+      const left=document.createElement("div");
+      const date=x.createdAt?.toDate ? x.createdAt.toDate().toLocaleString("ms-MY") : "Masa tidak tersedia";
+      left.innerHTML=`<strong>${money(x.total)}</strong><div class="muted">${date} · ${String(x.items?.length||0)} jenis item</div><div class="muted">${x.createdByEmail||"Pengguna"}</div>`;
+      line.appendChild(left);$("history").appendChild(line);
+    });
+  } catch(err){$("history").textContent="Gagal memuatkan sejarah: "+friendlyError(err);}
+}
+async function start() {
+  if(firebaseConfig.apiKey.startsWith("PASTE_") || firebaseConfig.appId.startsWith("PASTE_")) {
+    $("loginMessage").textContent="Lengkapkan firebaseConfig dalam fail index.html dahulu.";
+    return;
+  }
+  app=initializeApp(firebaseConfig);auth=getAuth(app);db=getFirestore(app);renderProducts();
+  onAuthStateChanged(auth,async user=>{
+    currentUser=user;
+    if(!user){$("loginPanel").classList.remove("hidden");$("appPanel").classList.add("hidden");$("logoutBtn").classList.add("hidden");return;}
+    try {
+      const userDoc=await getDoc(doc(db,"users",user.uid));
+      if(!userDoc.exists() || !["main","worker"].includes(userDoc.data().role)) {
+        $("loginPanel").classList.remove("hidden");$("appPanel").classList.add("hidden");$("logoutBtn").classList.remove("hidden");
+        $("loginMessage").textContent="Akaun ini belum diberi peranan. Pemilik perlu sediakan users/"+user.uid+" dengan field role = main atau worker.";
+        return;
+      }
+      role=userDoc.data().role;
+      $("loginPanel").classList.add("hidden");$("appPanel").classList.remove("hidden");$("logoutBtn").classList.remove("hidden");
+      $("welcome").textContent="Selamat datang, "+(user.email||"pengguna");
+      $("roleLabel").textContent=role==="main"?"Akses: MAIN (Pemilik)":"Akses: Pekerja";
+      showMessage("Disambungkan ke Firebase.","success");
+    } catch(err){$("loginPanel").classList.remove("hidden");$("loginMessage").textContent="Gagal menyemak peranan: "+friendlyError(err);}
+  });
+}
+start();
+</script>
+</body>
+</html>
